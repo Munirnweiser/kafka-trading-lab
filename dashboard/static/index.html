@@ -1,0 +1,613 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kafka Trading Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1120;
+      --panel: #131d30;
+      --border: #26344c;
+      --text: #e5edf8;
+      --muted: #91a2bb;
+      --green: #38d996;
+      --red: #ff7185;
+      --blue: #70a5ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, system-ui, Arial, sans-serif;
+    }
+
+    header {
+      padding: 24px 5%;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    h1 { font-size: 24px; margin: 0 0 7px; }
+    .muted { color: var(--muted); font-size: 13px; }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 13px;
+      border: 1px solid var(--border);
+      border-radius: 30px;
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+    }
+
+    .dot.online { background: var(--green); }
+
+    main { max-width: 1500px; margin: auto; padding: 24px 5%; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .panel, .metric {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+
+    .metric { padding: 19px; }
+    .metric-label { color: var(--muted); font-size: 13px; }
+    .metric-value { font-size: 27px; font-weight: 700; margin-top: 12px; }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    h2 { font-size: 17px; margin: 0; }
+
+    .panel { padding: 20px; margin-bottom: 22px; overflow: hidden; }
+
+    .pairs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+      gap: 12px;
+    }
+
+    .pair {
+      padding: 15px;
+      border-radius: 10px;
+      background: #0c1526;
+      border: 1px solid var(--border);
+    }
+
+    .pair-name { font-weight: 700; }
+    .pair-count { color: var(--blue); font-size: 23px; margin-top: 12px; }
+    .pair-label { color: var(--muted); font-size: 12px; margin-top: 3px; }
+
+    .table-wrap { overflow-x: auto; }
+
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+    th, td {
+      padding: 13px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    th { color: var(--muted); font-weight: 500; }
+    tbody tr:hover { background: #19263c; }
+    .buy { color: var(--green); font-weight: 700; }
+    .sell { color: var(--red); font-weight: 700; }
+    .tag {
+      padding: 5px 8px;
+      border-radius: 6px;
+      background: #223451;
+      color: #bcd3ff;
+      font-size: 12px;
+    }
+
+    .partitions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+    }
+
+    .partition {
+      background: #0c1526;
+      border: 1px solid var(--border);
+      padding: 15px;
+      border-radius: 10px;
+    }
+
+    .partition strong { display: block; font-size: 23px; margin: 10px 0; }
+    .empty { color: var(--muted); padding: 25px 0; text-align: center; }
+
+    footer { text-align: center; padding: 25px; color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 600px) {
+      header, main { padding-left: 16px; padding-right: 16px; }
+      .metric-value { font-size: 23px; }
+    }
+
+    .kafka-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .kafka-stat {
+      background: #0c1526;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 15px;
+    }
+    .kafka-stat-label { color: var(--muted); font-size: 12px; }
+    .kafka-stat-value { font-size: 23px; font-weight: 700; margin-top: 8px; }
+    .kafka-good { color: var(--green); }
+    .kafka-warn { color: #ffd166; }
+    .kafka-bad { color: var(--red); }
+  
+/* Simulated position viewer */
+.position-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 12px 0;
+}
+.position-stat {
+    flex: 1;
+    min-width: 140px;
+    padding: 12px;
+    border: 1px solid #303746;
+    border-radius: 10px;
+    background: #151b27;
+}
+.position-stat small {
+    display: block;
+    margin-bottom: 6px;
+    opacity: 0.75;
+}
+.position-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+#positionViewerPanel table {
+    width: 100%;
+    border-collapse: collapse;
+}
+#positionViewerPanel th,
+#positionViewerPanel td {
+    padding: 10px;
+    border-bottom: 1px solid #303746;
+    text-align: left;
+    white-space: nowrap;
+}
+#positionViewerPanel th {
+    opacity: 0.8;
+    font-size: 12px;
+}
+.position-positive { color: #46d39a; }
+.position-negative { color: #ff8585; }
+
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Kafka Trading Monitor</h1>
+      <div class="muted">FX trade flow · Kafka topic: trades</div>
+    </div>
+    <div class="status">
+      <span id="connectionDot" class="dot"></span>
+      <span id="connectionText">Connecting...</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="metrics">
+      <div class="metric">
+        <div class="metric-label">Trades received this session</div>
+        <div class="metric-value" id="total">0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Buy orders received</div>
+        <div class="metric-value" id="buys">0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Sell orders received</div>
+        <div class="metric-value" id="sells">0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Active currency pairs</div>
+        <div class="metric-value" id="pairCount">0</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-title">
+        <h2>Currency pair activity</h2>
+        <span class="muted">Trades received per pair</span>
+      </div>
+      <div id="pairs" class="pairs">
+        <div class="empty">Waiting for trades...</div>
+      </div>
+    </section>
+
+    
+    <section class="panel" id="positionViewerPanel">
+      <h2>Simulated Positions</h2>
+      <p>
+        Aggregated from the latest trades held in dashboard memory.
+        Net notional = BUY notional minus SELL notional.
+        This is not actual exposure or P&amp;L.
+      </p>
+
+      <div class="position-summary">
+        <div class="position-stat">
+          <small>Trades included</small>
+          <strong id="positionTradeCount">Loading...</strong>
+        </div>
+        <div class="position-stat">
+          <small>Currency pairs</small>
+          <strong id="positionPairCount">—</strong>
+        </div>
+        <div class="position-stat">
+          <small>API status</small>
+          <strong id="positionApiStatus">Connecting...</strong>
+        </div>
+      </div>
+
+      <div class="position-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>BUY trades</th>
+              <th>SELL trades</th>
+              <th>BUY notional</th>
+              <th>SELL notional</th>
+              <th>Net notional</th>
+              <th>Total trades</th>
+            </tr>
+          </thead>
+          <tbody id="positionTableBody">
+            <tr><td colspan="7">Loading positions...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p id="positionUpdatedAt"></p>
+    </section>
+
+<section class="panel" id="kafkaMonitorPanel">
+      <div class="section-title">
+        <h2>Kafka Health &amp; Consumer Lag</h2>
+        <span class="muted" id="kafkaLastUpdate">Loading metrics...</span>
+      </div>
+      <div class="kafka-summary">
+        <div class="kafka-stat">
+          <div class="kafka-stat-label">API status</div>
+          <div class="kafka-stat-value" id="kafkaHealth">Checking...</div>
+        </div>
+        <div class="kafka-stat">
+          <div class="kafka-stat-label">Consumer groups</div>
+          <div class="kafka-stat-value" id="kafkaGroupCount">—</div>
+        </div>
+        <div class="kafka-stat">
+          <div class="kafka-stat-label">Total reported lag</div>
+          <div class="kafka-stat-value" id="kafkaTotalLag">—</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Consumer group</th><th>Partition</th>
+            <th>Current offset</th><th>Log-end offset</th><th>Lag</th>
+          </tr></thead>
+          <tbody id="kafkaRows">
+            <tr><td colspan="5" class="empty">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">Refreshes every 10 seconds. Lag is summed across displayed groups.</p>
+    </section>
+
+    <section class="panel">
+      <div class="section-title">
+        <h2>Kafka partitions</h2>
+        <span class="muted">Based on trades received by this dashboard</span>
+      </div>
+      <div id="partitions" class="partitions"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-title">
+        <h2>Live FX trade feed</h2>
+        <span class="muted" id="lastUpdate">Waiting for data</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Trade ID</th>
+              <th>Producer</th>
+              <th>Currency pair</th>
+              <th>Side</th>
+              <th>Notional</th>
+              <th>Status</th>
+              <th>Partition</th>
+              <th>Offset</th>
+              <th>Created at</th>
+            </tr>
+          </thead>
+          <tbody id="tradeRows">
+            <tr><td colspan="9" class="empty">Waiting for Kafka events...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>Learning environment · Simulated trades · Not a live trading system</footer>
+
+  <script>
+    const trades = [];
+    const MAX_TRADES = 100;
+    let socket;
+    let reconnectTimer;
+    let sessionTotal = 0;
+    let sessionBuys = 0;
+    let sessionSells = 0;
+
+    function safe(value) {
+      const span = document.createElement("span");
+      span.textContent = String(value ?? "");
+      return span.innerHTML;
+    }
+
+    function number(value) {
+      return Number(value || 0).toLocaleString("en-CA");
+    }
+
+    function render() {
+      document.getElementById("total").textContent = number(sessionTotal);
+      document.getElementById("buys").textContent = number(sessionBuys);
+      document.getElementById("sells").textContent = number(sessionSells);
+
+      const pairCounts = {};
+      const partitionCounts = {};
+
+      for (const trade of trades) {
+        pairCounts[trade.symbol] = (pairCounts[trade.symbol] || 0) + 1;
+        partitionCounts[trade._partition] =
+          (partitionCounts[trade._partition] || 0) + 1;
+      }
+
+      const pairNames = Object.keys(pairCounts).sort();
+      document.getElementById("pairCount").textContent = pairNames.length;
+
+      document.getElementById("pairs").innerHTML = pairNames.length
+        ? pairNames.map(pair => `
+          <div class="pair">
+            <div class="pair-name">${safe(pair)}</div>
+            <div class="pair-count">${number(pairCounts[pair])}</div>
+            <div class="pair-label">Trades in recent feed</div>
+          </div>`).join("")
+        : '<div class="empty">Waiting for trades...</div>';
+
+      document.getElementById("partitions").innerHTML =
+        [0, 1, 2].map(partition => `
+          <div class="partition">
+            <span class="muted">Partition ${partition}</span>
+            <strong>${number(partitionCounts[partition] || 0)}</strong>
+            <span class="muted">Trades in recent feed</span>
+          </div>`).join("");
+
+      document.getElementById("tradeRows").innerHTML = trades.length
+        ? trades.map(trade => `
+          <tr>
+            <td>${safe(trade.tradeId)}</td>
+            <td><span class="tag">${safe(trade.producerId)}</span></td>
+            <td>${safe(trade.symbol)}</td>
+            <td class="${trade.side === "BUY" ? "buy" : "sell"}">${safe(trade.side)}</td>
+            <td>${number(trade.notional)}</td>
+            <td>${safe(trade.status)}</td>
+            <td>${safe(trade._partition)}</td>
+            <td>${safe(trade._offset)}</td>
+            <td>${safe(trade.createdAt)}</td>
+          </tr>`).join("")
+        : '<tr><td colspan="9" class="empty">Waiting for Kafka events...</td></tr>';
+    }
+
+    function connect() {
+      clearTimeout(reconnectTimer);
+
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(`${protocol}//${location.host}/ws`);
+
+      socket.onopen = () => {
+        document.getElementById("connectionText").textContent = "Connected";
+        document.getElementById("connectionDot").classList.add("online");
+      };
+
+      socket.onmessage = event => {
+        const trade = JSON.parse(event.data);
+        trades.unshift(trade);
+
+        if (trades.length > MAX_TRADES) trades.pop();
+
+        sessionTotal++;
+        if (trade.side === "BUY") sessionBuys++;
+        if (trade.side === "SELL") sessionSells++;
+
+        document.getElementById("lastUpdate").textContent =
+          "Last update: " + new Date().toLocaleTimeString();
+
+                render();
+        refreshPositionViewer();
+      };
+      
+
+      socket.onclose = () => {
+        document.getElementById("connectionText").textContent = "Reconnecting...";
+        document.getElementById("connectionDot").classList.remove("online");
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+
+      socket.onerror = () => socket.close();
+    }
+
+    render();
+    connect();
+
+    async function loadKafkaMonitoring() {
+      const health = document.getElementById("kafkaHealth");
+      const groupCount = document.getElementById("kafkaGroupCount");
+      const totalLag = document.getElementById("kafkaTotalLag");
+      const rows = document.getElementById("kafkaRows");
+      const updated = document.getElementById("kafkaLastUpdate");
+
+      try {
+        const response = await fetch("/api/kafka/consumer-groups", {
+          cache: "no-store"
+        });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+
+        const data = await response.json();
+        const partitions = data.partitions || [];
+        const groups = [...new Set(partitions.map(p => p.group))];
+        const lags = partitions.map(p => Number(p.lag))
+          .filter(n => Number.isFinite(n) && n >= 0);
+        const sum = lags.reduce((a, b) => a + b, 0);
+
+        health.textContent = "Connected";
+        health.className = "kafka-stat-value kafka-good";
+        groupCount.textContent = groups.length;
+        totalLag.textContent = sum;
+        totalLag.className = "kafka-stat-value " +
+          (sum > 100 ? "kafka-bad" : sum > 20 ? "kafka-warn" : "kafka-good");
+
+        rows.replaceChildren();
+        for (const p of partitions) {
+          const tr = document.createElement("tr");
+          const values = [
+            p.group, p.partition, p.currentOffset, p.logEndOffset,
+            p.lag === "-" ? "No committed offset" : p.lag
+          ];
+          for (const value of values) {
+            const td = document.createElement("td");
+            td.textContent = value ?? "—";
+            tr.appendChild(td);
+          }
+          const n = Number(p.lag);
+          if (Number.isFinite(n)) {
+            tr.lastElementChild.className =
+              n > 100 ? "kafka-bad" : n > 20 ? "kafka-warn" : "kafka-good";
+          }
+          rows.appendChild(tr);
+        }
+        updated.textContent = "Updated " + new Date().toLocaleTimeString();
+      } catch (error) {
+        health.textContent = "Unavailable";
+        health.className = "kafka-stat-value kafka-bad";
+        updated.textContent = error.message;
+      }
+    }
+
+    loadKafkaMonitoring();
+    setInterval(loadKafkaMonitoring, 10000);
+
+  
+async function refreshPositionViewer() {
+    const status = document.getElementById("positionApiStatus");
+    const body = document.getElementById("positionTableBody");
+
+    try {
+        const response = await fetch("/api/positions");
+        if (!response.ok) throw new Error("HTTP " + response.status);
+
+        const data = await response.json();
+        const positions = data.positions || [];
+
+        document.getElementById("positionTradeCount").textContent =
+            data.tradeCount ?? 0;
+        document.getElementById("positionPairCount").textContent =
+            positions.length;
+        status.textContent = "Online";
+        body.replaceChildren();
+
+        if (positions.length === 0) {
+            const row = body.insertRow();
+            const cell = row.insertCell();
+            cell.colSpan = 7;
+            cell.textContent = "No trades available yet.";
+        }
+
+        const fmt = new Intl.NumberFormat("en-CA", {
+            maximumFractionDigits: 2
+        });
+
+        for (const p of positions) {
+            const row = body.insertRow();
+            const values = [
+                p.symbol, p.buyTrades, p.sellTrades,
+                fmt.format(p.buyNotional),
+                fmt.format(p.sellNotional),
+                fmt.format(p.netNotional),
+                p.tradeCount
+            ];
+
+            values.forEach((value, i) => {
+                const cell = row.insertCell();
+                cell.textContent = value ?? "—";
+
+                if (i === 5) {
+                    const net = Number(p.netNotional);
+                    cell.className = net > 0 ? "position-positive"
+                        : net < 0 ? "position-negative" : "";
+                }
+            });
+        }
+
+        document.getElementById("positionUpdatedAt").textContent =
+            "Last updated: " + new Date().toLocaleTimeString();
+    } catch (error) {
+        status.textContent = "Error";
+        body.replaceChildren();
+        const row = body.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = 7;
+        cell.textContent = "Could not load positions: " + error.message;
+    }
+}
+
+refreshPositionViewer();
+setInterval(refreshPositionViewer, 10000);
+
+</script>
+</body>
+</html>
+

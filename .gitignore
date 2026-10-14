@@ -1,0 +1,25 @@
+.env
+
+# Secrets and local environment settings
+.env
+.env.*
+!.env.example
+
+# Python virtual environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local backups created during the lab
+*.before-*
+*.backup
+
+# Logs and editor/OS files
+*.log
+.DS_Store
+.vscode/
+.idea/
