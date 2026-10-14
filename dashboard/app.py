@@ -5,11 +5,23 @@ from fastapi.staticfiles import StaticFiles
 import asyncio
 import json
 import os
+from pathlib import Path
+import psycopg
+from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
 from confluent_kafka import Consumer, KafkaError
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env")
+
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+POSTGRES_DB = os.getenv("POSTGRES_DB", "trading_lab")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "trading_app")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
 BROKER = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 TOPIC = "trades"
@@ -149,61 +161,91 @@ async def get_kafka_consumer_groups():
 
 
 
-@app.get("/api/positions")
-async def get_positions():
-    positions = {}
+def build_positions_response(rows):
+    """Format PostgreSQL's grouped position rows for the dashboard."""
+    positions = []
+    total_trade_count = 0
 
-    for trade in latest_trades:
-        symbol = trade.get("symbol", "UNKNOWN")
-        side = str(trade.get("side", "")).upper()
+    for row in rows:
+        (
+            symbol,
+            buy_trades,
+            sell_trades,
+            buy_notional,
+            sell_notional,
+            trade_count,
+        ) = row
 
-        if side not in ("BUY", "SELL"):
-            continue
+        buy_value = round(float(buy_notional or 0), 2)
+        sell_value = round(float(sell_notional or 0), 2)
+        count = int(trade_count)
 
-        try:
-            notional = float(trade.get("notional", 0))
-        except (TypeError, ValueError):
-            continue
-
-        if notional < 0:
-            continue
-
-        if symbol not in positions:
-            positions[symbol] = {
-                "symbol": symbol,
-                "buyTrades": 0,
-                "sellTrades": 0,
-                "buyNotional": 0.0,
-                "sellNotional": 0.0,
-            }
-
-        item = positions[symbol]
-
-        if side == "BUY":
-            item["buyTrades"] += 1
-            item["buyNotional"] += notional
-        else:
-            item["sellTrades"] += 1
-            item["sellNotional"] += notional
-
-    results = []
-
-    for item in positions.values():
-        item["buyNotional"] = round(item["buyNotional"], 2)
-        item["sellNotional"] = round(item["sellNotional"], 2)
-        item["netNotional"] = round(
-            item["buyNotional"] - item["sellNotional"], 2
-        )
-        item["tradeCount"] = item["buyTrades"] + item["sellTrades"]
-        results.append(item)
-
-    results.sort(key=lambda item: item["symbol"])
+        positions.append({
+            "symbol": symbol,
+            "buyTrades": int(buy_trades),
+            "sellTrades": int(sell_trades),
+            "buyNotional": buy_value,
+            "sellNotional": sell_value,
+            "netNotional": round(buy_value - sell_value, 2),
+            "tradeCount": count,
+        })
+        total_trade_count += count
 
     return {
-        "scope": "latest trades held in dashboard memory",
-        "tradeCount": len(latest_trades),
-        "positions": results,
+        "scope": "all persisted BUY/SELL trades in PostgreSQL",
+        "tradeCount": total_trade_count,
+        "positions": positions,
     }
+
+
+@app.get("/api/positions")
+def get_positions():
+    """Calculate positions across all persisted valid BUY/SELL trades."""
+    if not POSTGRES_PASSWORD:
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL password is not configured",
+        )
+
+    query = """
+        SELECT
+            symbol,
+            COUNT(*) FILTER (WHERE side = 'BUY') AS buy_trades,
+            COUNT(*) FILTER (WHERE side = 'SELL') AS sell_trades,
+            COALESCE(
+                SUM(notional) FILTER (WHERE side = 'BUY'), 0
+            ) AS buy_notional,
+            COALESCE(
+                SUM(notional) FILTER (WHERE side = 'SELL'), 0
+            ) AS sell_notional,
+            COUNT(*) AS trade_count
+        FROM trades
+        WHERE side IN ('BUY', 'SELL')
+        GROUP BY symbol
+        ORDER BY symbol
+    """
+
+    try:
+        with psycopg.connect(
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            dbname=POSTGRES_DB,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            connect_timeout=3,
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+
+        return build_positions_response(rows)
+
+    except Exception as error:
+        print(f"PostgreSQL positions query failed: {error}")
+        raise HTTPException(
+            status_code=503,
+            detail="Could not retrieve positions from PostgreSQL",
+        ) from error
 
 
 @app.websocket("/ws")
